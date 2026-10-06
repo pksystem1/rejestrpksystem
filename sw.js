@@ -1,6 +1,6 @@
 /* PKSYSTEM – service worker: aplikacja działa offline po pierwszym otwarciu.
    Przy nowej wersji plików zmień numer w CACHE. */
-const CACHE = "pksystem-pilot-1-0";
+const CACHE = "pksystem-pilot-1-2";
 const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", e => {

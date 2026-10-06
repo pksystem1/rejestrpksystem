@@ -1638,8 +1638,7 @@ const REASONS = [
   {id:"inne",    name:"Inne", text:true}
 ];
 const DEFAULT_WORKERS = ["Rafał","Grzegorz","Kamil","Aleksandra","Daria","Monika","Tomek","Kazimierz"];
-const AUTO_RETURN_S = 10;
-const VERSION = "pilot 1.0";
+const VERSION = "pilot 1.2";
 /* ================================================================== */
 
 const $=(s,r=document)=>r.querySelector(s);
@@ -1697,15 +1696,16 @@ cfg.device=cfg.device==="private"?"private":"shared";
 cfg.workers=Array.isArray(cfg.workers)&&cfg.workers.length?cfg.workers:DEFAULT_WORKERS.slice();
 cfg.projects=typeof cfg.projects==="string"?cfg.projects:"";
 cfg.deviceName=typeof cfg.deviceName==="string"?cfg.deviceName:"";
+cfg.timeUnit=["s","min","h"].indexOf(cfg.timeUnit)>=0?cfg.timeUnit:"s";
 let entries=store.get("pk_entries",[]);
 let active=store.get("pk_active",[]);
 let me=store.get("pk_me","");
 let lastExport=store.get("pk_lastExport",0);
 let tab="home",mgrTab="entries",unlocked=false,range=7,onlyReview=false;
-let flow=freshFlow(),doneTimer=null,dlgHandler=null;
+let flow=freshFlow(),dlgHandler=null;
 const storageOk=store.set("pk_probe",1);
 
-function freshFlow(){return {step:1,shift:null,worker:"",client:"",project:"",op:null,opText:"",last:null,left:AUTO_RETURN_S}}
+function freshFlow(){return {step:1,shift:null,worker:"",client:"",project:"",op:null,opText:""}}
 const saveEntries=()=>store.set("pk_entries",entries);
 const saveActive=()=>store.set("pk_active",active);
 const saveCfg=()=>store.set("pk_cfg",cfg);
@@ -1780,7 +1780,6 @@ function installHint(){
 }
 
 function renderHome(){
-  if(flow.step==="done"){renderDone();return}
   let h='<div class="narrow">';
   if(flow.step===1){
     h+=stepper(1);
@@ -1851,26 +1850,11 @@ function startTimer(){
   const t={id:uid(),worker:flow.worker,shift:sh.id,client:clean(flow.client),project:clean(flow.project),op:flow.op,
     opText:flow.op==="inna"?clean(flow.opText):"",start:now,shiftEnd:shiftBounds(sh,now).to,pauses:[],open:null};
   active.push(t);saveActive();
-  flow.step="done";flow.last=t;flow.left=AUTO_RETURN_S;
-  renderHome();updateBadge();
-  clearInterval(doneTimer);
-  doneTimer=setInterval(()=>{
-    flow.left--;
-    if(flow.left<=0){resetFlow();renderHome()}else updateDone();
-  },1000);
+  const label=opLabel(opById(t.op),t.opText);
+  resetFlow();renderHome();updateBadge();
+  toast("Czas ruszył: "+t.worker+" · "+label);
 }
-function resetFlow(){clearInterval(doneTimer);doneTimer=null;flow=freshFlow()}
-function renderDone(){
-  const t=flow.last,op=opById(t.op),sh=shiftById(t.shift);
-  homeEl.innerHTML='<div class="narrow done"><div class="ring"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="r0" cx="60" cy="60" r="54"/><circle class="r1" id="ringP" cx="60" cy="60" r="54" stroke-dasharray="339.3" stroke-dashoffset="0" transform="rotate(-90 60 60)"/></svg><div class="rin"><b id="leftN">'+flow.left+'</b><small>sekund</small></div></div>'
-    +'<h1>Czas ruszył</h1><div class="panel dsum"><p><span class="opchip" style="--c:var(--op-'+op.id+')">'+esc(opLabel(op,t.opText))+'</span></p><p><b>'+esc(t.worker)+'</b> · '+esc(sh.name)+'</p><p>'+esc(t.client)+' · '+esc(t.project)+'</p><p class="muted">Start o '+fmtHM(t.start)+'</p></div>'
-    +'<button class="btn brand wide2" data-act="now">Wróć do wyboru zmiany</button><button class="btn ghost wide2" data-goto="active">Pokaż aktywne czasy</button></div>';
-}
-function updateDone(){
-  const n=$("#leftN"),p=$("#ringP");
-  if(n)n.textContent=flow.left;
-  if(p)p.style.strokeDashoffset=String(339.3*(1-flow.left/AUTO_RETURN_S));
-}
+function resetFlow(){flow=freshFlow()}
 
 homeEl.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
@@ -1895,7 +1879,6 @@ homeEl.addEventListener("click",e=>{
   }
   if(b.id==="startBtn"){startTimer();return}
   if(d.act==="forget"){me="";store.set("pk_me","");renderHome();return}
-  if(d.act==="now"){resetFlow();renderHome();return}
   if(d.act==="install"&&installEvt){installEvt.prompt();installEvt.userChoice.finally(()=>{installEvt=null;renderHome()});return}
   if(d.act==="hintoff"){store.set("pk_hint_off",true);renderHome();return}
   if(d.goto){setTab(d.goto)}
@@ -2165,7 +2148,10 @@ function mgrAnalysis(){
 }
 
 /* ---- Dane: eksport / wysyłanie / import ---- */
-const HEADERS=["ID wpisu","Urządzenie","Data","Zmiana","Pracownik","Klient","Projekt","Operacja","Opis operacji","Start","Stop","Czas pracy [min]","Czas pauz [min]","Pauzy (powód, minuty)","Sztuki","Uwagi","Do weryfikacji","Powód weryfikacji","Edytowane przez kierownika"];
+const UNITS={s:{ms:1000,dec:0,tag:"s",name:"sekundy",label:"Sekundy",st:0},min:{ms:6e4,dec:2,tag:"min",name:"minuty",label:"Minuty",st:4},h:{ms:36e5,dec:3,tag:"h",name:"godziny",label:"Godziny",st:5}};
+const unit=()=>UNITS[cfg.timeUnit]||UNITS.s;
+const tconv=ms=>{const f=Math.pow(10,unit().dec);return Math.round(ms/unit().ms*f)/f};
+const headers=()=>["ID wpisu","Urządzenie","Data","Zmiana","Pracownik","Klient","Projekt","Operacja","Opis operacji","Start","Stop","Czas pracy ["+unit().tag+"]","Czas pauz ["+unit().tag+"]","Pauzy (powód, "+unit().name+")","Sztuki","Uwagi","Do weryfikacji","Powód weryfikacji","Edytowane przez kierownika"];
 const WIDTHS=[16,16,12,10,14,18,16,15,14,20,20,12,12,34,8,28,12,18,14];
 const XLSX_MIME="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const r1=x=>Math.round(x*10)/10;
@@ -2177,11 +2163,11 @@ const sorted=()=>entries.slice().sort((a,b)=>a.start-b.start);
 
 function entryRecord(e){
   const day=new Date(e.start);day.setHours(0,0,0,0);
-  const pz=e.pauses.map(p=>rlabel(p)+" ("+String(r1(p.ms/6e4)).replace(".",",")+" min)").join("; ");
+  const pz=e.pauses.map(p=>rlabel(p)+" ("+String(tconv(p.ms)).replace(".",",")+" "+unit().tag+")").join("; ");
   const S=v=>({k:"s",v:String(v==null?"":v)});
   return [S(e.id),S(e.device||deviceName()),{k:"d",v:serial(day.getTime()),s:fmtDate(e.start)},S("Zmiana "+shiftById(e.shift).id),S(e.worker),S(e.client),S(e.project),S(opById(e.op).name),S(e.opText||""),
     {k:"dt",v:serial(e.start),s:fmtDT(e.start)},{k:"dt",v:serial(e.end),s:fmtDT(e.end)},
-    {k:"n",v:r1(entryWork(e)/6e4)},{k:"n",v:r1(entryPause(e)/6e4)},S(pz),
+    {k:"n",v:tconv(entryWork(e)),st:unit().st},{k:"n",v:tconv(entryPause(e)),st:unit().st},S(pz),
     e.qty==null?{k:"e"}:{k:"n",v:e.qty,int:true},S(e.note||""),S(e.review?"TAK":"NIE"),S(e.reviewReason||""),S(e.edited?"TAK":"NIE")];
 }
 function csvCell(c){
@@ -2193,7 +2179,7 @@ function csvCell(c){
   return /[";\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
 }
 function buildCsv(){
-  const head=HEADERS.map(h=>csvCell({k:"s",v:h}));
+  const head=headers().map(h=>csvCell({k:"s",v:h}));
   return "\uFEFF"+[head].concat(sorted().map(e=>entryRecord(e).map(csvCell))).map(r=>r.join(";")).join("\r\n")+"\r\n";
 }
 
@@ -2204,7 +2190,7 @@ async function buildXlsx(){
   const rows=sorted().map(entryRecord),NS='xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
   let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet '+NS+'><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>'
     +WIDTHS.map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join("")+'</cols><sheetData>';
-  x+='<row r="1">'+HEADERS.map((h,i)=>'<c r="'+colL(i)+'1" s="1" t="inlineStr"><is><t>'+xesc(h)+'</t></is></c>').join("")+'</row>';
+  x+='<row r="1">'+headers().map((h,i)=>'<c r="'+colL(i)+'1" s="1" t="inlineStr"><is><t>'+xesc(h)+'</t></is></c>').join("")+'</row>';
   rows.forEach((r,ri)=>{
     const n=ri+2;
     x+='<row r="'+n+'">'+r.map((c,i)=>{
@@ -2212,17 +2198,17 @@ async function buildXlsx(){
       if(c.k==="s")return c.v===""?"":'<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+xesc(c.v)+'</t></is></c>';
       if(c.k==="d")return '<c r="'+ref+'" s="2"><v>'+c.v+'</v></c>';
       if(c.k==="dt")return '<c r="'+ref+'" s="3"><v>'+c.v+'</v></c>';
-      if(c.k==="n")return '<c r="'+ref+'" s="'+(c.int?0:4)+'"><v>'+c.v+'</v></c>';
+      if(c.k==="n")return '<c r="'+ref+'" s="'+(c.int?0:(c.st||0))+'"><v>'+c.v+'</v></c>';
       return "";
     }).join("")+'</row>';
   });
-  x+='</sheetData><autoFilter ref="A1:'+colL(HEADERS.length-1)+(rows.length+1)+'"/></worksheet>';
-  const styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet '+NS+'><numFmts count="3"><numFmt numFmtId="164" formatCode="dd.mm.yyyy"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd hh:mm:ss"/><numFmt numFmtId="166" formatCode="0.0"/></numFmts>'
+  x+='</sheetData><autoFilter ref="A1:'+colL(headers().length-1)+(rows.length+1)+'"/></worksheet>';
+  const styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet '+NS+'><numFmts count="4"><numFmt numFmtId="164" formatCode="dd.mm.yyyy"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd hh:mm:ss"/><numFmt numFmtId="166" formatCode="0.00"/><numFmt numFmtId="167" formatCode="0.000"/></numFmts>'
     +'<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
     +'<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCEEF0"/><bgColor indexed="64"/></patternFill></fill></fills>'
     +'<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-    +'<cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
-    +'<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>'
+    +'<cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
+    +'<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>'
     +'<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
   const zip=new JSZip();
   zip.file("[Content_Types].xml",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
@@ -2327,9 +2313,10 @@ function rowToEntry(h,r){
   const op=OPS.find(o=>o.name.toLowerCase()===opName);
   if(isNaN(st)||isNaN(en)||en<=st||!worker||!op)return null;
   const pauses=[];
-  String(col("Pauzy (powód, minuty)")||"").split("; ").forEach(part=>{
-    const m=/^(.*) \(([\d.,]+) min\)$/.exec(part.trim());if(!m)return;
-    const lab=m[1].split(" – "),ms=Math.round(num(m[2])*6e4);
+  const pi=h.findIndex(x=>x.indexOf("Pauzy (powód")===0);
+  String(pi<0?"":(r[pi]||"")).split("; ").forEach(part=>{
+    const m=/^(.*) \(([\d.,]+) (s|min|h)\)$/.exec(part.trim());if(!m)return;
+    const lab=m[1].split(" – "),ms=Math.round(num(m[2])*({s:1e3,min:6e4,h:36e5})[m[3]]);
     if(!isNaN(ms))pauses.push({reason:lab[0],text:lab.slice(1).join(" – "),ms});
   });
   const q=col("Sztuki"),sh=/(\d)/.exec(String(col("Zmiana")));
@@ -2364,6 +2351,7 @@ function mgrData(){
    +'<button class="btn go wide2" id="sendBtn" data-send="1" disabled>Wyślij dane</button>'
    +'<div class="fileline"><button class="btn ghost small" id="dlX" data-export="xlsx" disabled>Zapisz Excel w telefonie</button><button class="btn ghost small" data-export="csv">Zapisz CSV</button></div>'
    +'<p class="muted">'+(lastExport?'Ostatnie wysłanie lub zapis: '+fmtDate(lastExport)+' '+fmtHM(lastExport)+'. Od tego czasu: '+unsynced+' '+plWpis(unsynced)+'.':'Z tego urządzenia nie wysłano jeszcze danych.')+' Wysyłaj dane po każdej zmianie – wyczyszczenie danych przeglądarki albo usunięcie ikony kasuje wpisy.</p></div>'
+   +'<div class="panel"><h3>Jednostka czasu w eksporcie</h3><p class="sub2">Dotyczy kolumn: czas pracy, czas pauz i pauzy (powód). Pozostałe kolumny bez zmian.</p><div class="filters">'+Object.keys(UNITS).map(k=>'<button class="chip" data-unit="'+k+'" aria-pressed="'+(unit()===UNITS[k])+'">'+UNITS[k].label+'</button>').join("")+'</div></div>'
    +'<div class="panel"><h3>Import i scalanie</h3><p class="sub2">Wczytaj pliki otrzymane z innych urządzeń (Excel lub CSV, można kilka naraz). Wpisy, które już tu są, zostaną pominięte (rozpoznanie po ID wpisu).</p>'
    +'<div class="fileline"><input type="file" id="impFile" accept=".csv,.xlsx" multiple hidden><button class="btn ghost" data-pick="impFile">Wybierz pliki</button></div></div>'
    +'<div class="panel"><h3>Kopia ustawień</h3><p class="sub2">Listy pracowników i projektów oraz typ urządzenia. Pozwala skonfigurować inne urządzenie jednym plikiem.</p>'
@@ -2404,11 +2392,12 @@ mgrEl.addEventListener("click",e=>{
   if(d.review){onlyReview=!onlyReview;renderMgr();return}
   if(d.edit){openEditor(d.edit);return}
   if(d.del){confirmDelete(d.del);return}
+  if(d.unit){cfg.timeUnit=d.unit;saveCfg();renderMgr();toast("Jednostka czasu w eksporcie: "+UNITS[d.unit].name);return}
   if(d.send){doSend();return}
   if(d.export){doExport(d.export);return}
   if(d.pick){$("#"+d.pick).click();return}
   if(d.cfgexp){
-    const f=new File([JSON.stringify({workers:cfg.workers,projects:cfg.projects,device:cfg.device,deviceName:cfg.deviceName},null,1)],"PKSYSTEM_ustawienia.json",{type:"application/json"});
+    const f=new File([JSON.stringify({workers:cfg.workers,projects:cfg.projects,device:cfg.device,deviceName:cfg.deviceName,timeUnit:cfg.timeUnit},null,1)],"PKSYSTEM_ustawienia.json",{type:"application/json"});
     shareFile(f,"PKSYSTEM – ustawienia","Ustawienia aplikacji PKSYSTEM").then(r=>{if(r==="downloaded")toast("Plik ustawień zapisany w telefonie")});return;
   }
   if(d.device){cfg.device=d.device;saveCfg();resetFlow();renderMgr();toast(d.device==="shared"?"Urządzenie wspólne":"Urządzenie prywatne");return}
@@ -2433,6 +2422,7 @@ mgrEl.addEventListener("change",e=>{
       const j=JSON.parse(txt);
       if(Array.isArray(j.workers)&&j.workers.length)cfg.workers=j.workers.map(clean).filter(Boolean).slice(0,60);
       if(typeof j.projects==="string")cfg.projects=j.projects;
+      if(["s","min","h"].indexOf(j.timeUnit)>=0)cfg.timeUnit=j.timeUnit;
       if(typeof j.deviceName==="string")cfg.deviceName=clean(j.deviceName).slice(0,30);
       if(j.device==="shared"||j.device==="private")cfg.device=j.device;
       saveCfg();renderMgr();toast("Wczytano ustawienia");
