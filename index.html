@@ -288,6 +288,7 @@ dialog[open]{animation:sheet .22s ease-out}
 .dc-l{font-size:12px;color:var(--muted)}
 #qr svg{display:block;max-width:100%;height:auto}
 .ver{color:var(--muted);font-size:14px}
+.upd{position:fixed;left:12px;right:12px;bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:70;display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--ink);color:var(--panel);border-radius:16px;padding:12px 14px;font-weight:700}
 .panel p.muted{font-size:14.5px}
 @media (prefers-reduced-motion:reduce){
   dialog[open]{animation:none}
@@ -1638,7 +1639,7 @@ const REASONS = [
   {id:"inne",    name:"Inne", text:true}
 ];
 const DEFAULT_WORKERS = ["Rafał","Grzegorz","Kamil","Aleksandra","Daria","Monika","Tomek","Kazimierz"];
-const VERSION = "pilot 1.2";
+const VERSION = "pilot 1.3";
 /* ================================================================== */
 
 const $=(s,r=document)=>r.querySelector(s);
@@ -1788,6 +1789,7 @@ function renderHome(){
       '<button class="tile" data-shift="'+s.id+'"><span class="t1">'+esc(s.name)+'</span><span class="t2">'+s.from+' – '+s.to+'</span>'+(isNow(s)?'<span class="now">trwa teraz</span>':'')+'</button>').join("")+'</div>';
     if(meValid())h+='<div style="margin-top:16px">'+miniActive(me)+'</div>';
     h+=installHint();
+    h+='<p class="ver" style="margin-top:18px">Wersja aplikacji: '+VERSION+'</p>';
   }else if(flow.step===2){
     h+=stepper(2)+'<button class="link back" data-back="1">← Zmiana</button><h1>Kto pracuje?</h1><div class="tiles auto">'+cfg.workers.map(w=>
       '<button class="tile person" data-worker="'+esc(w)+'">'+avatar(w)+'<span class="t1">'+esc(w)+'</span></button>').join("")+'</div>';
@@ -2369,8 +2371,9 @@ function mgrSettings(){
    +'<div class="panel"><h3>Pracownicy</h3><p class="sub2">Jedna osoba w wierszu. Lista pojawia się na ekranie wyboru.</p><textarea class="in" id="setW" rows="8">'+esc(cfg.workers.join("\n"))+'</textarea><button class="btn brand small" style="margin-top:10px" data-save="workers">Zapisz pracowników</button></div>'
    +'<div class="panel"><h3>Lista projektów (opcjonalna)</h3><p class="sub2">Wiersz w formacie: Klient; Numer projektu. Służy do podpowiedzi przy wpisywaniu. Docelowo lista z Excela na dysku sieciowym.</p><textarea class="in" id="setP" rows="8" placeholder="ABC Systemy; 2026-ABC-003">'+esc(cfg.projects)+'</textarea><button class="btn brand small" style="margin-top:10px" data-save="projects">Zapisz projekty</button></div>'
    +'<div class="panel"><h3>Zmiany i operacje</h3><p class="sub2">Ustawione w pliku aplikacji (stałe na górze kodu).</p><p>'+SHIFTS.map(s=>'<b>'+esc(s.name)+'</b> '+s.from+'–'+s.to).join("<br>")+'</p><p class="muted">Operacje: '+OPS.map(o=>esc(o.name)).join(", ")+'.<br>Powody pauz: '+REASONS.map(r=>esc(r.name)).join(", ")+'.</p></div>'
-   +'<div class="panel"><h3>Kod QR do wydruku</h3><p class="sub2">Prowadzi pod adres, z którego otwarto tę aplikację. Otwórz ją z docelowego adresu, żeby kod był właściwy.</p><div id="qr"></div><div class="url">'+esc(location.href.split("#")[0])+'</div></div>'
-   +'<div class="panel"><h3>Dane na tym urządzeniu</h3><p class="sub2">Wersja aplikacji: <b>'+VERSION+'</b>. Zapisane wpisy: '+entries.length+'.</p><button class="btn ghost small" style="color:var(--stop)" data-wipe="1">Usuń wszystkie dane</button></div>'
+   +'<div class="panel"><h3>Kod QR do wydruku</h3><p class="sub2">Prowadzi pod adres, z którego otwarto tę aplikację. Otwórz ją z docelowego adresu, żeby kod był właściwy.</p><div id="qr"></div><div class="url">'+esc(location.href.split("#")[0].split("?")[0])+'</div></div>'
+   +'<div class="panel"><h3>Aktualizacja aplikacji</h3><p class="sub2">Wersja: <b>'+VERSION+'</b>. Jeśli telefon pokazuje starą wersję, wymuś aktualizację. Zapisane wpisy zostają.</p><div class="fileline"><button class="btn ghost small" data-upd="check">Sprawdź aktualizację</button><button class="btn brand small" data-upd="force">Wymuś aktualizację</button></div></div>'
+   +'<div class="panel"><h3>Dane na tym urządzeniu</h3><p class="sub2">Zapisane wpisy: '+entries.length+'.</p><button class="btn ghost small" style="color:var(--stop)" data-wipe="1">Usuń wszystkie dane</button></div>'
    +'</div>';
 }
 function drawQR(){
@@ -2392,6 +2395,8 @@ mgrEl.addEventListener("click",e=>{
   if(d.review){onlyReview=!onlyReview;renderMgr();return}
   if(d.edit){openEditor(d.edit);return}
   if(d.del){confirmDelete(d.del);return}
+  if(d.upd==='check'){checkUpdate();return}
+  if(d.upd==='force'){forceUpdate();return}
   if(d.unit){cfg.timeUnit=d.unit;saveCfg();renderMgr();toast("Jednostka czasu w eksporcie: "+UNITS[d.unit].name);return}
   if(d.send){doSend();return}
   if(d.export){doExport(d.export);return}
@@ -2455,8 +2460,37 @@ document.addEventListener("focusout",()=>setTimeout(checkRot,150));
 applyTheme(store.get("pk_theme",null));
 setTab("home");
 checkRot();
-if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1"))
-  window.addEventListener("load",()=>{navigator.serviceWorker.register("sw.js").catch(()=>{})});
+/* ---------- aktualizacje aplikacji ---------- */
+function showUpdate(){
+  if($("#upd"))return;
+  const d=document.createElement("div");d.id="upd";d.className="upd";
+  d.innerHTML='<span>Dostępna nowa wersja aplikacji</span><button class="btn go small" id="updBtn">Odśwież</button>';
+  document.body.appendChild(d);$("#updBtn").onclick=()=>location.reload();
+}
+async function checkUpdate(){
+  if(!("serviceWorker" in navigator)){toast("Ta przeglądarka nie obsługuje aktualizacji w tle");return}
+  try{
+    const reg=await navigator.serviceWorker.getRegistration();
+    if(!reg){toast("Aplikacja działa bez trybu offline");return}
+    await reg.update();toast("Sprawdzono. Jeśli jest nowa wersja, pojawi się komunikat.");
+  }catch(e){toast("Nie udało się sprawdzić aktualizacji (brak internetu?)")}
+}
+async function forceUpdate(){
+  try{
+    if("serviceWorker" in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.map(r=>r.unregister()))}
+    if(window.caches){const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)))}
+  }catch(e){}
+  location.reload();
+}
+if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1")){
+  const hadCtl=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{
+    if(!hadCtl)return;
+    const typing=/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement||{}).tagName||"");
+    if(tab==="home"&&flow.step===1&&!dlg.open&&!typing)location.reload();else showUpdate();
+  });
+  window.addEventListener("load",()=>{navigator.serviceWorker.register("sw.js").then(r=>{if(r&&r.update)r.update()}).catch(()=>{})});
+}
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
 })();
 </script>
